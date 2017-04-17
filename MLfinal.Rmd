@@ -1,0 +1,139 @@
+---
+title: "Coursera Machine Learning Final Project"
+author: "mcm45"
+date: "April 16, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Background
+
+### Data
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+### Goals
+
+The goal of your project is to predict the manner in which they did 
+the exercise. This is the "classe" variable in the training set. 
+You may use any of the other variables to predict with. You should 
+create a report describing how you built your model, how you used 
+cross validation, what you think the expected out of sample error 
+is, and why you made the choices you did. You will also use your 
+prediction model to predict 20 different test cases. 
+
+```{r data}
+library(AppliedPredictiveModeling)
+library(ggplot2)
+library(lattice)
+library(caret)
+library(randomForest)
+training <- read.csv("pml-training.csv")
+testing <- read.csv("pml-testing.csv")
+dim(training)
+dim(testing)
+```
+
+## Partitioning and Understanding Data
+
+This is a moderate size dataset so cross validation will be done by partitioning this training set.
+
+```{r partition}
+trainIndex = createDataPartition(training$classe,p=0.7,list=FALSE)
+mytrain = training[trainIndex,]
+mytest = training[-trainIndex,]
+dim(mytrain)
+dim(mytest)
+#str(mytrain)
+```
+
+From looking at the str function results, it looks like the data come from four input sources: belt, dumbbell, forearm, and arm. There are several idenfitication variables (e.g. username) at the beginning of the dataset that won't be needed as predictors. There are also several variables with mostly NAs and others (skew and kurtosis variables) that likely have limited variance.
+
+## Cleaning
+
+These steps remove the identification variables, variables with over 75% NAs, and variables with near zero variance for both the new train and test sets.
+
+```{r clean}
+mytrain_rm <- mytrain[,8:160]
+#removew first 7 variables with username and other uninformative covariates
+mytrain_rm <- mytrain_rm[,colSums(!is.na(mytrain_rm)) > nrow(mytrain_rm)*.75]
+#removes variables with over 75% NAs
+nzv <- nearZeroVar(mytrain_rm, saveMetrics=T)
+mytrain_rm <- mytrain_rm[,nzv$nzv==F]
+#remove variables with non-zero variance
+train_short <- mytrain_rm
+dim(train_short)
+```
+
+Repeat for test set.
+
+```{r clean2}
+mytest_rm <- mytest[,8:160]
+mytest_rm <- mytest_rm[,colSums(!is.na(mytest_rm)) > nrow(mytest_rm)*.75]
+nzv <- nearZeroVar(mytest_rm, saveMetrics=T)
+test_short <- mytest_rm[,nzv$nzv==F]
+dim(test_short)
+```
+
+### Plotting Selected Features
+
+```{r plot, echo=FALSE}
+featurePlot(mytrain[,c("roll_forearm", "roll_dumbbell", "roll_arm", "roll_belt")],  y = mytrain$class, plots = "pairs")
+featurePlot(mytrain[,c("pitch_forearm", "pitch_dumbbell", "pitch_arm", "pitch_belt")],  y = mytrain$class, plots = "pairs")
+featurePlot(mytrain[,c("yaw_forearm", "yaw_dumbbell", "yaw_arm", "yaw_belt")],  y = mytrain$class, plots = "pairs")
+```
+
+It doesn't look like these features will need to be transformed.
+
+## Modeling Building
+
+###Decision Tree
+
+```{r decision}
+set.seed(2468)
+modFit <- train(classe ~ ., method="rpart", data=train_short) 
+pred.t <- predict(modFit, newdata=test_short)
+confusionMatrix(pred.t, test_short$classe)
+```
+
+This model does not predict very well. The prediction accuracy and kappa is pretty low, at .49 and .29, respectively.
+
+###Random Forests
+
+```{r forest}
+set.seed(3579)
+modFit_rf <- randomForest(classe ~ ., method="rf", data=train_short) 
+pred.rf <- predict(modFit_rf, newdata=test_short)
+confusionMatrix(pred.rf, test_short$classe)
+```
+
+The prediction accuracy and kappa is great for this approach -- over 99%. Almost every prediction was correct in the test set.
+
+###Model Based Prediction
+
+```{r lda}
+set.seed(5432)
+modFit_lda <- train(classe ~ ., method="lda", data=train_short)
+pred.lda <- predict(modFit_lda, newdata=test_short)
+confusionMatrix(pred.lda, test_short$classe)
+```
+
+This approach was better than the decision tree (.70 accuracy, .62 kappa) but not as good as the random forests.
+
+###Model Selection and Out of Sample Error
+
+Since the random forest model was so good, ensemble models are not likely needed.
+
+Out of sample error is predicted at 1-.9946 = .56%. This model is likely over fit to the data, however, so the out of sample error may be greater.
+
+###Variable Importance from Random Forest Model
+
+```{r varimp}
+varImpPlot(modFit_rf, pch=19, n.var = 10, sort = T, main = "Variable Importance") 
+```
+
+While the first two most important variables in classification were on the belt, most of the others were related to dumbbell. This ranking of top 10 variable importance may be useful in providing feedback to wearable users on how to improve their weightlifting technique.
+
